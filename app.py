@@ -3,6 +3,7 @@ import time
 import pypdfium2 as pdfium
 import streamlit as st
 from google import genai
+from PIL import Image
 from pypdf import PdfReader
 
 # If one model is busy, the next one is tried
@@ -17,20 +18,27 @@ except Exception:
     st.stop()
 
 
-def ask_gemini(prompt, images=None):
+def stream_gemini(prompt, images=None):
     contents = [prompt] + (images or [])
     last_error = None
     for attempt in range(2):
         for model in MODELS:
             try:
-                response = client.models.generate_content(
+                placeholder = st.empty()
+                full_text = ""
+                for chunk in client.models.generate_content_stream(
                     model=model, contents=contents
-                )
-                return response.text
+                ):
+                    if chunk.text:
+                        full_text += chunk.text
+                        placeholder.markdown(full_text)
+                if full_text:
+                    placeholder.empty()
+                    return full_text
             except Exception as error:
                 last_error = error
         if attempt == 0:
-            time.sleep(10)
+            time.sleep(2)
     st.error(f"Gemini error: {last_error}")
     return None
 
@@ -51,12 +59,17 @@ def read_pdf(pdf_bytes):
     images = []
     if scan_indices:
         pdf_doc = pdfium.PdfDocument(pdf_bytes)
-        for i in scan_indices[:10]:
-            bitmap = pdf_doc[i].render(scale=1.5)
-            images.append(bitmap.to_pil())
+        for i in scan_indices[:5]:
+            bitmap = pdf_doc[i].render(scale=1.0)
+            pil_img: Image.Image = bitmap.to_pil()
+            images.append(pil_img)
 
     return "\n".join(text_parts), images
 
+
+st.session_state.setdefault("last_answer", "")
+st.session_state.setdefault("last_summary", "")
+st.session_state.setdefault("last_quiz", "")
 
 st.title("📚 AI Study Assistant")
 st.write("Upload your college notes and study smarter.")
@@ -70,6 +83,10 @@ uploaded_file = st.sidebar.file_uploader("Upload your PDF notes", type=["pdf"])
 pdf_text, pdf_images = "", []
 if uploaded_file is not None:
     pdf_text, pdf_images = read_pdf(uploaded_file.getvalue())
+    st.sidebar.caption(
+        f"Loaded {len(pdf_images)} scanned page image(s)"
+        + (" + extracted text" if pdf_text.strip() else "")
+    )
 
 st.header(page)
 
@@ -92,11 +109,13 @@ NOTES:
 {pdf_text}
 
 QUESTION: {question}"""
-            with st.spinner("Thinking..."):
-                answer = ask_gemini(prompt, pdf_images)
+            answer = stream_gemini(prompt, pdf_images)
             if answer:
-                st.subheader("Answer")
-                st.write(answer)
+                st.session_state["last_answer"] = answer
+
+    if st.session_state["last_answer"]:
+        st.subheader("Answer")
+        st.markdown(st.session_state["last_answer"])
 
 elif page == "Summarize Notes":
     style = st.radio("Summary style", ["Short", "Detailed", "Exam revision sheet"])
@@ -107,11 +126,17 @@ Use headings and bullet points. Keep definitions and formulas.
 
 NOTES:
 {pdf_text}"""
-        with st.spinner("Summarizing..."):
-            summary = ask_gemini(prompt, pdf_images)
+        summary = stream_gemini(prompt, pdf_images)
         if summary:
-            st.markdown(summary)
-            st.download_button("Download summary", summary, file_name="summary.txt")
+            st.session_state["last_summary"] = summary
+
+    if st.session_state["last_summary"]:
+        st.markdown(st.session_state["last_summary"])
+        st.download_button(
+            "Download summary",
+            st.session_state["last_summary"],
+            file_name="summary.txt",
+        )
 
 elif page == "Generate Quiz":
     number = st.slider("Number of questions", 3, 15, 5)
@@ -124,11 +149,13 @@ Write the line ###ANSWERS### and then the answers with short explanations.
 
 NOTES:
 {pdf_text}"""
-        with st.spinner("Creating quiz..."):
-            quiz = ask_gemini(prompt, pdf_images)
+        quiz = stream_gemini(prompt, pdf_images)
         if quiz:
-            questions, _, answers = quiz.partition("###ANSWERS###")
-            st.markdown(questions)
-            if answers:
-                with st.expander("Show answers"):
-                    st.markdown(answers)
+            st.session_state["last_quiz"] = quiz
+
+    if st.session_state["last_quiz"]:
+        questions, _, answers = st.session_state["last_quiz"].partition("###ANSWERS###")
+        st.markdown(questions)
+        if answers:
+            with st.expander("Show answers"):
+                st.markdown(answers)
