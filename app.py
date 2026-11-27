@@ -3,11 +3,9 @@ import io
 import os
 import time
 
-import pypdfium2 as pdfium
 import streamlit as st
 from google import genai
 from google.genai import types
-from PIL import Image
 from pypdf import PdfReader
 
 # If one model is busy, the next one is tried
@@ -20,6 +18,8 @@ FILE_TYPES = {
         "jpg": "image/jpeg",
         "jpeg": "image/jpeg",
         "webp": "image/webp",
+        "heic": "image/heic",
+        "heif": "image/heif",
     },
     "video": {
         "mp4": "video/mp4",
@@ -37,7 +37,8 @@ FILE_TYPES = {
 }
 ICONS = {"pdf": "📄", "image": "🖼️", "video": "🎬", "audio": "🎧"}
 ALL_EXTENSIONS = [ext for group in FILE_TYPES.values() for ext in group]
-INLINE_IMAGE_LIMIT = 4 * 1024 * 1024  # bigger images go through the Files API
+INLINE_LIMIT = 8 * 1024 * 1024  # files up to this size are sent directly (fast)
+INLINE_TOTAL_LIMIT = 14 * 1024 * 1024  # Gemini limits one request's size, so cap the total sent directly
 PAGES = ["💬 Ask Questions", "📝 Summarize", "🎯 Quiz"]
 AVATARS = {"user": "🎓", "assistant": "🤖"}
 
@@ -181,7 +182,7 @@ def stream_gemini(prompt, media=None, show=True):
 
 
 def upload_to_gemini(data, name, mime):
-    """Upload a big file (video, audio, large image) and wait until Gemini has processed it."""
+    """Upload a big file (PDF, video, audio, large image) and wait until Gemini has processed it."""
     gemini_file = client.files.upload(
         file=io.BytesIO(data),
         config=types.UploadFileConfig(mime_type=mime, display_name=name),
@@ -214,73 +215,50 @@ def format_size(num_bytes):
 
 
 @st.cache_data(show_spinner=False)
-def read_pdf(pdf_bytes):
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    text_parts = []
-    scan_indices = []
-
-    for i, page in enumerate(reader.pages):
-        text = (page.extract_text() or "").strip()
-        if len(text) >= 30:
-            text_parts.append(text)
-        else:
-            scan_indices.append(i)
-
-    images = []
-    if scan_indices:
-        pdf_doc = pdfium.PdfDocument(pdf_bytes)
-        for i in scan_indices[:5]:
-            bitmap = pdf_doc[i].render(scale=1.0)
-            pil_img: Image.Image = bitmap.to_pil()
-            images.append((i + 1, pil_img))
-
-    return "\n".join(text_parts), images, len(reader.pages), len(scan_indices)
+def count_pages(pdf_bytes):
+    try:
+        return len(PdfReader(io.BytesIO(pdf_bytes)).pages)
+    except Exception:
+        return 0
 
 
 def load_files(uploaded_files):
-    """Turn every uploaded file into text and/or media that Gemini can read."""
+    """Send every uploaded file to Gemini as a whole, so it can read all of it."""
     docs = []
     cache = st.session_state["media_cache"]
+    labels = {"pdf": "PDF", "image": "Image", "video": "Video", "audio": "Audio"}
+    inline_total = 0
 
     for file in uploaded_files:
         kind, mime = file_kind(file.name)
         if kind is None:
             continue
         data = file.getvalue()
-        doc = {"name": file.name, "kind": kind, "size": file.size, "text": "", "media": [], "pages": 0}
+        key = f"{file.name}-{file.size}"
 
-        if kind == "pdf":
-            with st.spinner(f"Reading {file.name}..."):
-                text, images, page_count, scanned = read_pdf(data)
-            doc["text"] = text
-            doc["pages"] = page_count
-            doc["scanned"] = scanned
-            for page_number, img in images:
-                doc["media"] += [f"[Scanned page {page_number} of {file.name}]", img]
-        else:
-            key = f"{file.name}-{file.size}"
-            if key not in cache:
-                try:
-                    if kind == "image" and len(data) <= INLINE_IMAGE_LIMIT:
-                        cache[key] = types.Part.from_bytes(data=data, mime_type=mime)
-                    else:
-                        with st.spinner(f"Uploading and processing {file.name}... (videos can take a minute)"):
-                            cache[key] = upload_to_gemini(data, file.name, mime)
-                except Exception as error:
-                    st.error(f"Could not prepare {file.name}: {error}")
-                    continue
-            doc["media"] = [f"[{kind.capitalize()} file: {file.name}]", cache[key]]
+        if key not in cache:
+            try:
+                fits = inline_total + len(data) <= INLINE_TOTAL_LIMIT
+                if kind in ("pdf", "image") and len(data) <= INLINE_LIMIT and fits:
+                    cache[key] = types.Part.from_bytes(data=data, mime_type=mime)
+                else:
+                    with st.spinner(f"Uploading {file.name}... (big files and videos can take a minute)"):
+                        cache[key] = upload_to_gemini(data, file.name, mime)
+            except Exception as error:
+                st.error(f"Could not prepare {file.name}: {error}")
+                continue
 
-        docs.append(doc)
+        if isinstance(cache[key], types.Part):
+            inline_total += len(data)
+
+        docs.append({
+            "name": file.name,
+            "kind": kind,
+            "size": file.size,
+            "pages": count_pages(data) if kind == "pdf" else 0,
+            "media": [f"[{labels[kind]} file: {file.name}]", cache[key]],
+        })
     return docs
-
-
-def build_context(docs):
-    notes = "\n\n".join(
-        f"=== {doc['name']} ===\n{doc['text']}" for doc in docs if doc["text"].strip()
-    )
-    media = [item for doc in docs for item in doc["media"]]
-    return notes or "(No text notes. Use the attached files.)", media
 
 
 # ---------- Session state ----------
@@ -332,10 +310,6 @@ with st.sidebar:
 </div>"""
         st.markdown(f'<div class="section-label">Your files ({len(docs)})</div>{items}', unsafe_allow_html=True)
 
-        scanned_total = sum(doc.get("scanned", 0) for doc in docs)
-        if scanned_total:
-            st.caption(f"ℹ️ {scanned_total} scanned PDF page(s) found. Up to 5 per PDF are read as images.")
-
         st.button("↺ Start over", on_click=start_over, width="stretch")
 
     st.markdown(
@@ -361,7 +335,7 @@ if not docs:
     <p>Multiple-choice questions at your chosen difficulty, with explained answers.</p></div>
 </div>
 <div class="format-row">Supported:
-  <span class="pill">📄 PDF</span><span class="pill">🖼️ PNG · JPG · WEBP</span>
+  <span class="pill">📄 PDF</span><span class="pill">🖼️ PNG · JPG · WEBP · HEIC</span>
   <span class="pill">🎬 MP4 · MOV · WEBM</span><span class="pill">🎧 MP3 · WAV</span>
 </div>
 """,
@@ -372,7 +346,7 @@ if not docs:
     st.stop()
 
 # ---------- Main app ----------
-notes, media = build_context(docs)
+media = [item for doc in docs for item in doc["media"]]
 
 st.markdown(
     """
@@ -445,12 +419,10 @@ if page == PAGES[0]:
             for m in messages[-6:]
         )
         prompt = f"""You are a helpful study assistant.
-Answer using ONLY the provided notes and the attached files (images, scanned pages, videos, audio).
-Explain simply. If the answer is not in the materials, say so.
-When useful, mention which file the answer comes from.
-
-NOTES:
-{notes}
+Answer using ONLY the attached study files. Read every page of each PDF, including text,
+tables, diagrams and scanned or handwritten pages, and also use any images, videos and audio.
+Explain simply. If the answer is not in the files, say so.
+When useful, mention which file (and page) the answer comes from.
 
 CONVERSATION SO FAR:
 {history or "(none)"}
@@ -473,11 +445,9 @@ elif page == PAGES[1]:
     clicked = st.button("✨ Generate summary", type="primary")
 
     if clicked:
-        prompt = f"""Summarize these study materials (notes plus any attached images, videos or audio). Style: {style}.
-Use headings and bullet points. Keep definitions and formulas.
-
-NOTES:
-{notes}"""
+        prompt = f"""Summarize ALL the attached study files: every page of each PDF, plus any images, videos or audio.
+Style: {style}. Use headings and bullet points. Keep definitions and formulas.
+If there are several files, cover each of them."""
         with st.container(border=True):
             summary = stream_gemini(prompt, media)
         if summary:
@@ -502,12 +472,10 @@ elif page == PAGES[2]:
 
     if st.button("🎯 Generate quiz", type="primary"):
         prompt = f"""Create {number} {difficulty} multiple-choice questions
-from these study materials (notes plus any attached images, videos or audio).
+covering ALL the attached study files: every page of each PDF, plus any images, videos or audio.
+Spread the questions across all the files and topics.
 Number each question in bold, and put options A to D on separate lines.
-Write the line ###ANSWERS### and then the answers with short explanations.
-
-NOTES:
-{notes}"""
+Write the line ###ANSWERS### and then the answers with short explanations."""
         with st.spinner("Creating your quiz..."):
             quiz = stream_gemini(prompt, media, show=False)
         if quiz:
