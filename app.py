@@ -38,109 +38,105 @@ FILE_TYPES = {
         "aac": "audio/aac",
     },
 }
-ICONS = {"pdf": "📄", "image": "🖼️", "video": "🎬", "audio": "🎧"}
+KIND_LABELS = {"pdf": "PDF", "image": "Image", "video": "Video", "audio": "Audio"}
 ALL_EXTENSIONS = [ext for group in FILE_TYPES.values() for ext in group]
 INLINE_LIMIT = 8 * 1024 * 1024  # files up to this size are sent directly (fast)
 INLINE_TOTAL_LIMIT = 14 * 1024 * 1024  # Gemini limits one request's size, so cap the total sent directly
-PAGES = ["💬 Ask Questions", "📝 Summarize", "🎯 Quiz"]
-AVATARS = {"user": "🎓", "assistant": "🤖"}
+PAGES = ["Ask", "Summarize", "Quiz"]
+LETTERS = ["A", "B", "C", "D"]
 
-st.set_page_config(
-    page_title="AI Study Assistant",
-    page_icon="📚",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+st.set_page_config(page_title="Study Assistant", page_icon="📘", layout="centered")
 
 # ---------- Styling ----------
+# Ballpoint blue on white paper, with highlighter yellow used only where
+# a student would actually highlight: the page title and correct answers.
 st.markdown(
     """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap');
 
-html, body, .stApp, .stMarkdown p, .stMarkdown li, h1, h2, h3, h4, input, textarea {
-    font-family: 'Inter', sans-serif !important;
+:root {
+    --ink: #1F2328;
+    --muted: #5B6472;
+    --pen: #2747A8;
+    --highlight: #FFE66D;
+    --rule: #DDE1E7;
+    --side: #F3F5F8;
+    --wrong: #B42318;
 }
+
+.stApp, .stApp p, .stApp li, .stApp label, .stApp input, .stApp textarea,
+.stApp h1, .stApp h2, .stApp h3, .stApp button p {
+    font-family: 'Atkinson Hyperlegible', sans-serif !important;
+}
+.stApp p, .stApp li {font-size: 1.02rem; line-height: 1.6; color: var(--ink);}
 footer, [data-testid="stAppDeployButton"] {display: none;}
-.block-container {padding-top: 1.6rem; padding-bottom: 6rem; max-width: 1150px;}
+.block-container {padding-top: 2.5rem; padding-bottom: 7rem; max-width: 780px;}
 
-/* Hero */
-.hero {
-    background: radial-gradient(circle at 85% 20%, rgba(167,139,250,0.35), transparent 45%),
-                linear-gradient(135deg, #0f172a 0%, #1e1b4b 55%, #3730a3 100%);
-    border-radius: 20px;
-    padding: 2.2rem 2.4rem;
-    margin-bottom: 1.4rem;
-    box-shadow: 0 18px 40px -18px rgba(30, 27, 75, 0.55);
+/* Highlighter stroke, like a marker pen pulled across the line */
+.marked {
+    background: linear-gradient(100deg, transparent 0.4%, var(--highlight) 1.2%, var(--highlight) 98.6%, transparent 99.4%);
+    background-size: 100% 52%;
+    background-position: 0 78%;
+    background-repeat: no-repeat;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+    padding: 0 0.15em;
 }
-.hero.compact {padding: 1.3rem 1.8rem;}
-.hero-badge {
-    display: inline-block;
-    background: rgba(255,255,255,0.12);
-    border: 1px solid rgba(255,255,255,0.22);
-    color: #e0e7ff;
-    font-size: 0.78rem; font-weight: 600; letter-spacing: 0.02em;
-    padding: 0.28rem 0.75rem; border-radius: 999px; margin-bottom: 0.8rem;
-}
-.hero h1 {color: #fff; font-size: 2.3rem; font-weight: 800; margin: 0; padding: 0; letter-spacing: -0.02em;}
-.hero.compact h1 {font-size: 1.55rem;}
-.hero p {color: #c7d2fe; font-size: 1.05rem; margin: 0.45rem 0 0; max-width: 640px;}
-.hero.compact p {font-size: 0.95rem;}
 
-/* Feature cards on the welcome screen */
-.feature-grid {display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; margin: 0.4rem 0 1.4rem;}
-.feature-card {
-    background: #fff; border: 1px solid #e5e7eb; border-radius: 16px; padding: 1.3rem 1.3rem 1.1rem;
-    transition: transform .15s ease, box-shadow .15s ease;
-}
-.feature-card:hover {transform: translateY(-3px); box-shadow: 0 12px 28px -14px rgba(79,70,229,0.35);}
-.feature-icon {
-    width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
-    background: #eef2ff; font-size: 1.3rem; margin-bottom: 0.8rem;
-}
-.feature-card h4 {margin: 0 0 0.3rem; font-size: 1.05rem; font-weight: 700; color: #111827;}
-.feature-card p {margin: 0; font-size: 0.9rem; color: #6b7280; line-height: 1.5;}
+/* Welcome screen */
+.intro-title {font-size: 2.6rem; font-weight: 700; line-height: 1.15; color: var(--ink); margin: 0 0 1rem; letter-spacing: -0.01em;}
+.lede {font-size: 1.15rem !important; color: var(--muted) !important; max-width: 36em; margin-bottom: 2rem;}
+.steps {padding-left: 1.3rem; margin: 0 0 1.8rem;}
+.steps li {margin-bottom: 0.6rem; padding-left: 0.3rem;}
+.steps li::marker {color: var(--pen); font-weight: 700;}
+.formats {font-size: 0.92rem !important; color: var(--muted) !important; border-top: 1px solid var(--rule); padding-top: 1rem;}
 
-.format-row {display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; color: #6b7280; font-size: 0.88rem;}
-.pill {background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 999px; padding: 0.25rem 0.7rem; font-weight: 500; color: #374151;}
-
-/* Metric cards */
-[data-testid="stMetric"] {
-    background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 0.9rem 1.1rem;
-}
-[data-testid="stMetricLabel"] p {font-size: 0.82rem; color: #6b7280; font-weight: 600;}
-[data-testid="stMetricValue"] {font-size: 1.6rem; font-weight: 700; color: #111827;}
+/* Page header once files are added */
+.masthead {border-bottom: 2px solid var(--ink); padding-bottom: 0.8rem; margin-bottom: 1.4rem;}
+.masthead h1 {font-size: 1.9rem; font-weight: 700; margin: 0; padding: 0; color: var(--ink);}
+.masthead p {margin: 0.3rem 0 0; color: var(--muted) !important; font-size: 0.98rem !important;}
 
 /* Sidebar */
-[data-testid="stSidebar"] {background: #f8f9fc; border-right: 1px solid #e5e7eb;}
-.brand {display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.3rem;}
-.brand-logo {
-    width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(135deg, #4f46e5, #7c3aed); font-size: 1.25rem;
-}
-.brand-name {font-weight: 800; font-size: 1.1rem; color: #111827; line-height: 1.1;}
-.brand-sub {font-size: 0.78rem; color: #6b7280;}
-.section-label {font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #9ca3af; margin: 0.6rem 0 0.4rem;}
-.file-item {
-    display: flex; align-items: center; gap: 0.6rem; background: #fff; border: 1px solid #e5e7eb;
-    border-radius: 10px; padding: 0.5rem 0.7rem; margin-bottom: 0.4rem;
-}
-.file-icon {font-size: 1.1rem;}
-.file-name {font-size: 0.85rem; font-weight: 600; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;}
-.file-meta {font-size: 0.74rem; color: #6b7280;}
-.file-text {min-width: 0;}
-.credit {font-size: 0.8rem; color: #6b7280; margin-top: 1rem;}
-.credit a {color: #4f46e5; font-weight: 600; text-decoration: none;}
+[data-testid="stSidebar"] {background: var(--side); border-right: 1px solid var(--rule);}
+.wordmark {font-size: 1.35rem; font-weight: 700; color: var(--pen); margin-bottom: 0.1rem;}
+.side-note {font-size: 0.9rem !important; color: var(--muted) !important; margin-bottom: 1rem;}
+.file-row {padding: 0.55rem 0; border-bottom: 1px solid var(--rule);}
+.file-row:last-child {border-bottom: none;}
+.file-name {font-weight: 700; font-size: 0.92rem; color: var(--ink); overflow-wrap: anywhere;}
+.file-meta {font-size: 0.82rem; color: var(--muted);}
+.tag {display: inline-block; font-size: 0.72rem; font-weight: 700; color: var(--pen); border: 1px solid var(--pen); border-radius: 3px; padding: 0 0.3rem; margin-right: 0.35rem;}
+.disclaimer {font-size: 0.8rem !important; color: var(--muted) !important; margin-top: 1.5rem;}
+
+/* Navigation */
+button[kind="segmented_controlActive"] {background: var(--pen) !important; border-color: var(--pen) !important;}
+button[kind="segmented_controlActive"] p {color: #fff !important;}
 
 /* Buttons */
-.stButton > button, .stDownloadButton > button {border-radius: 10px; font-weight: 600;}
+.stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {border-radius: 6px; font-weight: 700;}
 
-/* Chat */
-[data-testid="stChatMessage"] {
-    background: #fff; border: 1px solid #eef0f4; border-radius: 16px; padding: 0.9rem 1.1rem; margin-bottom: 0.6rem;
+/* Chat: your questions sit on a grey slip, answers on the page */
+[data-testid="stChatMessage"] {background: transparent; padding: 0.9rem 0; border-radius: 0;}
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
+    background: var(--side); border-radius: 8px; padding: 0.8rem 1rem;
 }
-.empty-chat {text-align: center; padding: 2rem 1rem 1rem; color: #6b7280;}
-.empty-chat h3 {color: #111827; font-weight: 700; margin-bottom: 0.2rem;}
+.meta {font-size: 0.8rem; color: var(--muted);}
+
+/* Quiz results */
+.score {font-size: 1.5rem !important; margin-bottom: 0.2rem;}
+.option {padding: 0.25rem 0; color: var(--ink);}
+.option .letter {display: inline-block; width: 1.6rem; font-weight: 700; color: var(--muted);}
+.option.correct .letter {color: var(--ink);}
+.option.correct .text {font-weight: 700;}
+.option.wrong .text {color: var(--wrong); text-decoration: line-through;}
+.option .note {font-size: 0.8rem; color: var(--muted); margin-left: 0.4rem;}
+.option.wrong .note {color: var(--wrong);}
+.why {color: var(--muted) !important; font-size: 0.95rem !important; margin-top: 0.5rem;}
+
+@media (max-width: 640px) {
+    .intro-title {font-size: 2rem;}
+    .block-container {padding-top: 1.5rem;}
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -159,6 +155,13 @@ def model_config(model, **settings):
     if model.startswith("gemini-2.5"):
         settings["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
     return types.GenerateContentConfig(**settings)
+
+
+def gemini_error(error):
+    st.error(
+        "Gemini didn't respond. Wait a few seconds and try again. "
+        f"If it keeps happening, check your API key and usage limits.\n\nDetails: {error}"
+    )
 
 
 def stream_gemini(prompt, media=None, show=True):
@@ -181,7 +184,9 @@ def stream_gemini(prompt, media=None, show=True):
                 if full_text:
                     if placeholder:
                         placeholder.markdown(full_text)
-                    st.session_state["last_meta"] = f"⚡ {model} · {time.time() - started:.1f}s"
+                    st.session_state["last_meta"] = (
+                        f"Answered by {model} in {time.time() - started:.1f}s"
+                    )
                     return full_text
             except Exception as error:
                 last_error = error
@@ -189,7 +194,7 @@ def stream_gemini(prompt, media=None, show=True):
                 placeholder.empty()
         if attempt == 0:
             time.sleep(2)
-    st.error(f"Gemini error: {last_error}")
+    gemini_error(last_error)
     return None
 
 
@@ -220,9 +225,9 @@ class QuizQuestion(BaseModel):
 
 def generate_quiz(prompt, media, number):
     """Ask Gemini for quiz questions as structured data, showing live progress."""
-    status = st.status("Creating your quiz...", expanded=True)
+    status = st.status("Creating your quiz", expanded=True)
     with status:
-        bar = st.progress(0.0, text="Sending your files to Gemini...")
+        bar = st.progress(0.0, text="Sending your files to Gemini")
 
     started = time.time()
     last_error = None
@@ -234,7 +239,7 @@ def generate_quiz(prompt, media, number):
                 response_schema=list[QuizQuestion],
             )
             try:
-                bar.progress(0.0, text=f"Reading your files with {model}...")
+                bar.progress(0.0, text=f"Reading your files with {model}")
                 text = ""
                 for chunk in client.models.generate_content_stream(
                     model=model, contents=[prompt] + media, config=config
@@ -245,7 +250,7 @@ def generate_quiz(prompt, media, number):
                         if written:
                             bar.progress(
                                 written / number,
-                                text=f"Writing question {written} of {number}...",
+                                text=f"Writing question {written} of {number}",
                             )
 
                 quiz = []
@@ -260,23 +265,20 @@ def generate_quiz(prompt, media, number):
                             "explanation": q.explanation,
                         })
                 if quiz:
-                    bar.progress(1.0, text="Done!")
-                    st.session_state["last_meta"] = f"⚡ {model} · {time.time() - started:.1f}s"
-                    status.update(
-                        label=f"Quiz ready · ⚡ {model} · {time.time() - started:.1f}s",
-                        state="complete",
-                        expanded=False,
-                    )
+                    seconds = time.time() - started
+                    bar.progress(1.0, text="Done")
+                    st.session_state["last_meta"] = f"Written by {model} in {seconds:.1f}s"
+                    status.update(label=f"Quiz ready in {seconds:.1f}s", state="complete", expanded=False)
                     return quiz
             except Exception as error:
                 last_error = error
                 with status:
-                    st.caption(f"⚠️ {model} didn't respond properly, trying the next model...")
+                    st.caption(f"{model} didn't respond properly. Trying the next model.")
         if attempt == 0:
             time.sleep(2)
 
     status.update(label="Couldn't create the quiz", state="error", expanded=True)
-    st.error(f"Gemini error: {last_error}")
+    gemini_error(last_error)
     return None
 
 
@@ -295,6 +297,12 @@ def format_size(num_bytes):
     return f"{num_bytes / (1024 * 1024):.1f} MB"
 
 
+def join_words(items):
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
 @st.cache_data(show_spinner=False)
 def count_pages(pdf_bytes):
     try:
@@ -307,7 +315,6 @@ def load_files(uploaded_files):
     """Send every uploaded file to Gemini as a whole, so it can read all of it."""
     docs = []
     cache = st.session_state["media_cache"]
-    labels = {"pdf": "PDF", "image": "Image", "video": "Video", "audio": "Audio"}
     inline_total = 0
 
     for file in uploaded_files:
@@ -323,10 +330,10 @@ def load_files(uploaded_files):
                 if kind in ("pdf", "image") and len(data) <= INLINE_LIMIT and fits:
                     cache[key] = types.Part.from_bytes(data=data, mime_type=mime)
                 else:
-                    with st.spinner(f"Uploading {file.name}... (big files and videos can take a minute)"):
+                    with st.spinner(f"Uploading {file.name}. Large files and videos can take a minute."):
                         cache[key] = upload_to_gemini(data, file.name, mime)
             except Exception as error:
-                st.error(f"Could not prepare {file.name}: {error}")
+                st.error(f"Couldn't read {file.name}. Try uploading it again. Details: {error}")
                 continue
 
         if isinstance(cache[key], types.Part):
@@ -337,9 +344,24 @@ def load_files(uploaded_files):
             "kind": kind,
             "size": file.size,
             "pages": count_pages(data) if kind == "pdf" else 0,
-            "media": [f"[{labels[kind]} file: {file.name}]", cache[key]],
+            "media": [f"[{KIND_LABELS[kind]} file: {file.name}]", cache[key]],
         })
     return docs
+
+
+def describe_files(docs):
+    """'2 PDFs (48 pages) and 1 video' style summary."""
+    parts = []
+    for kind, word in [("pdf", "PDF"), ("image", "image"), ("video", "video"), ("audio", "audio file")]:
+        group = [d for d in docs if d["kind"] == kind]
+        if not group:
+            continue
+        text = f"{len(group)} {word}{'s' if len(group) > 1 else ''}"
+        if kind == "pdf":
+            pages = sum(d["pages"] for d in group)
+            text += f" ({pages} page{'s' if pages != 1 else ''})"
+        parts.append(text)
+    return join_words(parts)
 
 
 # ---------- Session state ----------
@@ -352,7 +374,7 @@ st.session_state.setdefault("media_cache", {})
 st.session_state.setdefault("page", PAGES[0])
 
 
-def start_over():
+def clear_results():
     st.session_state["messages"] = []
     st.session_state["last_summary"] = ""
     st.session_state["quiz"] = []
@@ -362,42 +384,38 @@ def start_over():
 # ---------- Sidebar ----------
 with st.sidebar:
     st.markdown(
-        """
-<div class="brand">
-  <div class="brand-logo">📚</div>
-  <div><div class="brand-name">Study Assistant</div><div class="brand-sub">AI-powered learning</div></div>
-</div>
-""",
+        '<div class="wordmark">Study Assistant</div>'
+        '<p class="side-note">Add lecture notes, photos of your notebook or class recordings.</p>',
         unsafe_allow_html=True,
     )
-    st.divider()
 
     uploaded_files = st.file_uploader(
-        "Upload study materials",
+        "Your files",
         type=ALL_EXTENSIONS,
         accept_multiple_files=True,
-        help="PDFs, images, videos and audio. You can select several files at once.",
+        help="You can select several files at once.",
     )
 
     docs = load_files(uploaded_files) if uploaded_files else []
 
     if docs:
-        items = ""
+        rows = ""
         for doc in docs:
             meta = format_size(doc["size"])
             if doc["kind"] == "pdf":
-                meta = f"{doc['pages']} pages · {meta}"
-            items += f"""
-<div class="file-item">
-  <div class="file-icon">{ICONS[doc['kind']]}</div>
-  <div class="file-text"><div class="file-name">{html.escape(doc['name'])}</div><div class="file-meta">{meta}</div></div>
-</div>"""
-        st.markdown(f'<div class="section-label">Your files ({len(docs)})</div>{items}', unsafe_allow_html=True)
-
-        st.button("↺ Start over", on_click=start_over, width="stretch")
+                meta = f"{doc['pages']} pages, {meta}"
+            rows += (
+                f'<div class="file-row"><div class="file-name">'
+                f'<span class="tag">{KIND_LABELS[doc["kind"]]}</span>{html.escape(doc["name"])}</div>'
+                f'<div class="file-meta">{meta}</div></div>'
+            )
+        st.markdown(rows, unsafe_allow_html=True)
+        st.write("")
+        st.button("Clear all results", on_click=clear_results, width="stretch")
 
     st.markdown(
-        '<div class="credit">Powered by Google Gemini</div>',
+        '<p class="disclaimer">Answers are written by Google Gemini and can be wrong. '
+        "Check anything important against your notes.</p>",
         unsafe_allow_html=True,
     )
 
@@ -405,50 +423,29 @@ with st.sidebar:
 if not docs:
     st.markdown(
         """
-<div class="hero">
-  <div class="hero-badge">✨ Powered by Google Gemini</div>
-  <h1>AI Study Assistant</h1>
-  <p>Turn your lecture notes, slides, photos and recordings into answers, summaries and practice quizzes in seconds.</p>
-</div>
-<div class="feature-grid">
-  <div class="feature-card"><div class="feature-icon">💬</div><h4>Ask anything</h4>
-    <p>Chat with your study materials. Follow-up questions remember the conversation.</p></div>
-  <div class="feature-card"><div class="feature-icon">📝</div><h4>Smart summaries</h4>
-    <p>Short overviews, detailed notes or exam revision sheets, ready to download.</p></div>
-  <div class="feature-card"><div class="feature-icon">🎯</div><h4>Practice quizzes</h4>
-    <p>Multiple-choice questions at your chosen difficulty, with explained answers.</p></div>
-</div>
-<div class="format-row">Supported:
-  <span class="pill">📄 PDF</span><span class="pill">🖼️ PNG · JPG · WEBP · HEIC</span>
-  <span class="pill">🎬 MP4 · MOV · WEBM</span><span class="pill">🎧 MP3 · WAV</span>
-</div>
+<h1 class="intro-title"><span class="marked">Study from your own notes.</span></h1>
+<p class="lede">Upload lecture PDFs, photos of your notebook or a recorded class.
+Ask questions about them, get a summary for revision, or test yourself with a quiz.</p>
+<ol class="steps">
+  <li><strong>Add your files</strong> in the sidebar. You can add several at once.</li>
+  <li><strong>Choose Ask, Summarize or Quiz</strong> at the top of the page.</li>
+  <li><strong>Check answers against your notes.</strong> Each answer says which file it came from.</li>
+</ol>
+<p class="formats">Works with PDFs, images (PNG, JPG, WEBP, HEIC), video (MP4, MOV, WEBM)
+and audio (MP3, WAV). Files up to 200 MB each.</p>
 """,
         unsafe_allow_html=True,
     )
-    st.write("")
-    st.info("👈 Upload one or more files in the sidebar to get started.")
     st.stop()
 
 # ---------- Main app ----------
 media = [item for doc in docs for item in doc["media"]]
 
 st.markdown(
-    """
-<div class="hero compact">
-  <h1>AI Study Assistant</h1>
-  <p>Ask questions, summarize and quiz yourself across all your uploaded files.</p>
-</div>
-""",
+    f'<div class="masthead"><h1>Study Assistant</h1>'
+    f"<p>Working from {describe_files(docs)}.</p></div>",
     unsafe_allow_html=True,
 )
-
-count = {kind: sum(1 for d in docs if d["kind"] == kind) for kind in ICONS}
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Files", len(docs))
-col2.metric("PDF pages", sum(d["pages"] for d in docs))
-col3.metric("Images", count["image"])
-col4.metric("Videos & audio", count["video"] + count["audio"])
-st.write("")
 
 choice = st.segmented_control(
     "Feature", PAGES, default=st.session_state["page"], label_visibility="collapsed"
@@ -457,47 +454,44 @@ if choice:
     st.session_state["page"] = choice
 page = st.session_state["page"]
 
-# ---------- Ask Questions ----------
-if page == PAGES[0]:
+# ---------- Ask ----------
+if page == "Ask":
     messages = st.session_state["messages"]
     question = None
 
     if not messages:
-        st.markdown(
-            '<div class="empty-chat"><h3>What would you like to learn?</h3>'
-            "<p>Ask a question below, or try one of these:</p></div>",
-            unsafe_allow_html=True,
-        )
+        st.subheader("Ask about your files")
+        st.write("Type a question at the bottom of the page. Follow-up questions remember the conversation.")
         suggestions = [
-            "What are the key ideas in these files?",
-            "List the important definitions",
-            "Explain the hardest topic simply",
+            "Explain the main topics",
+            "List the key definitions",
+            "What might come up in the exam?",
         ]
         cols = st.columns(len(suggestions))
         for col, suggestion in zip(cols, suggestions):
             if col.button(suggestion, width="stretch"):
                 question = suggestion
     else:
-        top_left, top_right1, top_right2 = st.columns([4, 1, 1])
+        _, save_col, clear_col = st.columns([3, 1, 1])
         chat_text = "\n\n".join(
             f"**{'You' if m['role'] == 'user' else 'Assistant'}:** {m['content']}" for m in messages
         )
-        top_right1.download_button("⬇️ Save chat", chat_text, file_name="chat.md", width="stretch")
-        if top_right2.button("🗑️ Clear", width="stretch"):
+        save_col.download_button("Save chat", chat_text, file_name="chat.md", width="stretch")
+        if clear_col.button("Clear chat", width="stretch"):
             st.session_state["messages"] = []
             st.rerun()
 
     for message in messages:
-        with st.chat_message(message["role"], avatar=AVATARS[message["role"]]):
+        with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if message.get("meta"):
-                st.caption(message["meta"])
+                st.markdown(f'<span class="meta">{message["meta"]}</span>', unsafe_allow_html=True)
 
-    typed = st.chat_input("Ask anything about your files...")
+    typed = st.chat_input("Ask a question about your files")
     question = typed or question
 
     if question:
-        with st.chat_message("user", avatar=AVATARS["user"]):
+        with st.chat_message("user"):
             st.markdown(question)
 
         history = "\n".join(
@@ -515,7 +509,7 @@ CONVERSATION SO FAR:
 
 QUESTION: {question}"""
 
-        with st.chat_message("assistant", avatar=AVATARS["assistant"]):
+        with st.chat_message("assistant"):
             answer = stream_gemini(prompt, media)
 
         if answer:
@@ -526,43 +520,45 @@ QUESTION: {question}"""
             st.rerun()
 
 # ---------- Summarize ----------
-elif page == PAGES[1]:
+elif page == "Summarize":
+    st.subheader("Summarize your files")
     style = st.radio(
-        "Summary style", ["Short", "Detailed", "Exam revision sheet"], horizontal=True
+        "Summary style",
+        ["Short", "Detailed", "Exam revision sheet"],
+        horizontal=True,
+        captions=["Key points only", "Section by section", "Definitions, formulas, likely questions"],
     )
-    clicked = st.button("✨ Generate summary", type="primary")
+    clicked = st.button("Write summary", type="primary")
 
     if clicked:
         prompt = f"""Summarize ALL the attached study files: every page of each PDF, plus any images, videos or audio.
 Style: {style}. Use headings and bullet points. Keep definitions and formulas.
 If there are several files, cover each of them."""
-        with st.container(border=True):
-            summary = stream_gemini(prompt, media)
+        summary = stream_gemini(prompt, media)
         if summary:
             st.session_state["last_summary"] = summary
             st.session_state["summary_meta"] = st.session_state.get("last_meta", "")
     elif st.session_state["last_summary"]:
-        with st.container(border=True):
-            st.markdown(st.session_state["last_summary"])
-            st.caption(st.session_state.get("summary_meta", ""))
+        st.markdown(st.session_state["last_summary"])
+        st.markdown(f'<span class="meta">{st.session_state.get("summary_meta", "")}</span>', unsafe_allow_html=True)
 
     if st.session_state["last_summary"]:
+        st.write("")
         st.download_button(
-            "⬇️ Download summary",
+            "Download summary",
             st.session_state["last_summary"],
             file_name="summary.md",
             mime="text/markdown",
         )
 
 # ---------- Quiz ----------
-elif page == PAGES[2]:
-    LETTERS = ["A", "B", "C", "D"]
-
+elif page == "Quiz":
+    st.subheader("Test yourself")
     col1, col2 = st.columns(2)
     number = col1.slider("Number of questions", 3, 15, 5)
     difficulty = col2.selectbox("Difficulty", ["Easy", "Medium", "Hard"])
 
-    if st.button("🎯 Generate quiz", type="primary"):
+    if st.button("Create quiz", type="primary"):
         prompt = f"""Create {number} {difficulty} multiple-choice questions
 covering ALL the attached study files: every page of each PDF, plus any images, videos or audio.
 Spread the questions across all the files and topics.
@@ -581,14 +577,9 @@ Mix up which position the correct option is in."""
     quiz_id = st.session_state["quiz_id"]
     answers = st.session_state["quiz_answers"]
 
-    def option_labels(q):
-        return [f"{LETTERS[j]}. {text}" for j, text in enumerate(q["options"])]
-
-    if quiz and st.session_state.get("quiz_meta"):
-        st.caption(f"Created with {st.session_state['quiz_meta']}")
-
     if quiz and answers is None:
         # Taking the quiz
+        st.markdown(f'<span class="meta">{st.session_state.get("quiz_meta", "")}</span>', unsafe_allow_html=True)
         with st.form(f"quiz_form_{quiz_id}", border=False):
             for i, q in enumerate(quiz):
                 with st.container(border=True):
@@ -597,12 +588,12 @@ Mix up which position the correct option is in."""
                     st.radio(
                         f"Answer for question {i + 1}",
                         range(4),
-                        format_func=lambda j, q=q: option_labels(q)[j],
+                        format_func=lambda j, q=q: f"{LETTERS[j]}.  {q['options'][j]}",
                         index=None,
                         key=f"quiz_{quiz_id}_{i}",
                         label_visibility="collapsed",
                     )
-            if st.form_submit_button("✅ Submit answers", type="primary"):
+            if st.form_submit_button("Submit answers", type="primary"):
                 st.session_state["quiz_answers"] = [
                     st.session_state.get(f"quiz_{quiz_id}_{i}") for i in range(len(quiz))
                 ]
@@ -611,39 +602,47 @@ Mix up which position the correct option is in."""
     elif quiz:
         # Showing results
         score = sum(1 for q, a in zip(quiz, answers) if a == q["correct"])
-        percent = round(score / len(quiz) * 100)
+        percent = score / len(quiz) * 100
         if percent >= 80:
-            message = "🏆 Excellent work!"
+            message = "Strong result. Read the explanations for any you guessed."
         elif percent >= 50:
-            message = "👍 Good effort, review the ones you missed."
+            message = "Halfway there. Go through the ones you missed below."
         else:
-            message = "📚 Keep practicing, check the explanations below."
+            message = "Worth another read of your notes before you retake it."
 
-        with st.container(border=True):
-            c1, c2 = st.columns([1, 3])
-            c1.metric("Your score", f"{score} / {len(quiz)}")
-            c2.markdown(f"### {message}")
-            c2.progress(percent / 100, text=f"{percent}% correct")
+        st.markdown(
+            f'<p class="score">You got <strong>{score} of {len(quiz)}</strong> right.</p><p>{message}</p>',
+            unsafe_allow_html=True,
+        )
 
         for i, (q, chosen) in enumerate(zip(quiz, answers)):
             with st.container(border=True):
-                status = "✅" if chosen == q["correct"] else "❌"
-                st.markdown(f"**{status} Question {i + 1}**")
+                result = "Correct" if chosen == q["correct"] else ("Not answered" if chosen is None else "Incorrect")
+                st.markdown(f"**Question {i + 1}: {result}**")
                 st.markdown(q["question"])
-                lines = []
-                for j, label in enumerate(option_labels(q)):
+                rows = ""
+                for j, option in enumerate(q["options"]):
+                    text = html.escape(option)
                     if j == q["correct"]:
-                        lines.append(f"🟢 **{label}**")
+                        note = "Your answer" if j == chosen else "Correct answer"
+                        rows += (
+                            f'<div class="option correct"><span class="letter">{LETTERS[j]}</span>'
+                            f'<span class="text marked">{text}</span><span class="note">{note}</span></div>'
+                        )
                     elif j == chosen:
-                        lines.append(f"🔴 ~~{label}~~ (your answer)")
+                        rows += (
+                            f'<div class="option wrong"><span class="letter">{LETTERS[j]}</span>'
+                            f'<span class="text">{text}</span><span class="note">Your answer</span></div>'
+                        )
                     else:
-                        lines.append(f"⚪ {label}")
-                st.markdown("  \n".join(lines))
-                if chosen is None:
-                    st.caption("You didn't answer this one.")
-                st.info(f"**Why:** {q['explanation']}")
+                        rows += (
+                            f'<div class="option"><span class="letter">{LETTERS[j]}</span>'
+                            f'<span class="text">{text}</span></div>'
+                        )
+                st.markdown(rows, unsafe_allow_html=True)
+                st.markdown(f'<p class="why">{html.escape(q["explanation"])}</p>', unsafe_allow_html=True)
 
-        if st.button("🔁 Retake this quiz"):
+        if st.button("Retake this quiz"):
             st.session_state["quiz_answers"] = None
             st.session_state["quiz_id"] += 1
             st.rerun()
