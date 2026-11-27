@@ -42,101 +42,74 @@ KIND_LABELS = {"pdf": "PDF", "image": "Image", "video": "Video", "audio": "Audio
 ALL_EXTENSIONS = [ext for group in FILE_TYPES.values() for ext in group]
 INLINE_LIMIT = 8 * 1024 * 1024  # files up to this size are sent directly (fast)
 INLINE_TOTAL_LIMIT = 14 * 1024 * 1024  # Gemini limits one request's size, so cap the total sent directly
-PAGES = ["Ask", "Summarize", "Quiz"]
 LETTERS = ["A", "B", "C", "D"]
 
-st.set_page_config(page_title="Study Assistant", page_icon="📘", layout="centered")
+st.set_page_config(page_title="Study Lamp", page_icon="💡", layout="wide")
 
 # ---------- Styling ----------
-# Ballpoint blue on white paper, with highlighter yellow used only where
-# a student would actually highlight: the page title and correct answers.
 st.markdown(
     """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Source+Serif+4:ital,wght@0,400;0,700;1,400&display=swap');
+:root {--bg: #14120F; --panel: #1E1B17; --line: #332E26; --ink: #F5EFE3; --muted: #A89F8E; --amber: #FFB547; --mint: #B9E4C9; --coral: #F2A38F;}
+.stApp {background: var(--bg);}
+.stApp p, .stApp li, .stApp label, .stApp input, .stApp textarea {font-family: 'Inter', sans-serif; color: var(--ink);}
+.stApp h1, .stApp h2, .stApp h3, .serif {font-family: 'Source Serif 4', Georgia, serif !important; color: var(--ink);}
+footer, [data-testid="stAppDeployButton"], [data-testid="stSidebar"] {display: none;}
+[data-testid="stHeader"] {background: transparent;}
+.block-container {max-width: 1180px; padding-top: 3rem; padding-bottom: 7rem;}
+.logo {font-size: 1.7rem;}
+.logo b {color: var(--amber);}
+.muted {color: var(--muted) !important; font-size: 0.9rem !important;}
+.right {text-align: right; padding-top: 0.5rem;}
+.kicker {font-size: 0.72rem !important; letter-spacing: 0.18em; color: var(--amber) !important; font-weight: 700;}
 
-:root {
-    --ink: #1F2328;
-    --muted: #5B6472;
-    --pen: #2747A8;
-    --highlight: #FFE66D;
-    --rule: #DDE1E7;
-    --side: #F3F5F8;
-    --wrong: #B42318;
-}
+/* Buttons: pills, amber when active */
+.stButton button, .stDownloadButton button {border-radius: 30px; background: var(--panel); border: 1px solid var(--line); font-weight: 700;}
+.stButton button:hover, .stDownloadButton button:hover {border-color: var(--amber);}
+.stButton button[kind="primary"] {background: var(--amber); border-color: var(--amber);}
+.stButton button[kind="primary"] p {color: var(--bg);}
 
-.stApp, .stApp p, .stApp li, .stApp label, .stApp input, .stApp textarea,
-.stApp h1, .stApp h2, .stApp h3, .stApp button p {
-    font-family: 'Atkinson Hyperlegible', sans-serif !important;
-}
-.stApp p, .stApp li {font-size: 1.02rem; line-height: 1.6; color: var(--ink);}
-footer, [data-testid="stAppDeployButton"] {display: none;}
-.block-container {padding-top: 2.5rem; padding-bottom: 7rem; max-width: 780px;}
+/* Panels */
+.st-key-hero, .st-key-files, .st-key-progress, .st-key-question {background: var(--panel); border: 1px solid var(--line); border-radius: 22px; padding: 1.5rem;}
+.st-key-hero {background: radial-gradient(500px 360px at 50% 0, #4A351466, transparent), var(--panel); padding: 3.5rem 2rem; text-align: center;}
+.headline {font-size: 3.1rem; line-height: 1.2; margin-bottom: 0.8rem;}
+.headline i {color: var(--amber);}
+[data-testid="stFileUploaderDropzone"] {background: transparent; border: 2px dashed #FFB54780; border-radius: 20px; padding: 2rem;}
 
-/* Highlighter stroke, like a marker pen pulled across the line */
-.marked {
-    background: linear-gradient(100deg, transparent 0.4%, var(--highlight) 1.2%, var(--highlight) 98.6%, transparent 99.4%);
-    background-size: 100% 52%;
-    background-position: 0 78%;
-    background-repeat: no-repeat;
-    -webkit-box-decoration-break: clone;
-    box-decoration-break: clone;
-    padding: 0 0.15em;
-}
+/* Desk tiles */
+.st-key-tile_ask button, .st-key-tile_sum button, .st-key-tile_quiz button {border: none; border-radius: 22px; min-height: 8.5rem; justify-content: flex-start; align-items: flex-start; text-align: left; padding: 1.4rem 1.5rem;}
+.st-key-tile_ask button > div, .st-key-tile_sum button > div, .st-key-tile_quiz button > div {justify-content: flex-start; text-align: left;}
+.st-key-tile_ask button {background: var(--amber);}
+.st-key-tile_sum button {background: var(--mint);}
+.st-key-tile_quiz button {background: var(--coral);}
+.st-key-tile_ask button p, .st-key-tile_sum button p, .st-key-tile_quiz button p {color: var(--bg); font-weight: 400;}
+.st-key-tile_ask button strong, .st-key-tile_sum button strong, .st-key-tile_quiz button strong {font-family: 'Source Serif 4', Georgia, serif; font-size: 1.6rem;}
 
-/* Welcome screen */
-.intro-title {font-size: 2.6rem; font-weight: 700; line-height: 1.15; color: var(--ink); margin: 0 0 1rem; letter-spacing: -0.01em;}
-.lede {font-size: 1.15rem !important; color: var(--muted) !important; max-width: 36em; margin-bottom: 2rem;}
-.steps {padding-left: 1.3rem; margin: 0 0 1.8rem;}
-.steps li {margin-bottom: 0.6rem; padding-left: 0.3rem;}
-.steps li::marker {color: var(--pen); font-weight: 700;}
-.formats {font-size: 0.92rem !important; color: var(--muted) !important; border-top: 1px solid var(--rule); padding-top: 1rem;}
+/* Chat */
+[data-testid="stChatMessage"] {background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 1rem;}
+[data-testid="stBottom"] > div {background: var(--bg);}
 
-/* Page header once files are added */
-.masthead {border-bottom: 2px solid var(--ink); padding-bottom: 0.8rem; margin-bottom: 1.4rem;}
-.masthead h1 {font-size: 1.9rem; font-weight: 700; margin: 0; padding: 0; color: var(--ink);}
-.masthead p {margin: 0.3rem 0 0; color: var(--muted) !important; font-size: 0.98rem !important;}
+/* Quiz */
+.count {font-size: 3.6rem; line-height: 1.1;}
+.count span {font-size: 1.4rem; color: var(--muted);}
+.bars {display: flex; gap: 6px; margin: 1rem 0 1.5rem;}
+.bars i {flex: 1; height: 8px; border-radius: 5px; background: var(--line);}
+.bars i.done {background: var(--mint);}
+.bars i.now {background: var(--amber);}
+.qtext {font-size: 2rem; line-height: 1.35; margin-bottom: 1rem;}
+.st-key-opts button {border-radius: 18px; min-height: 4.5rem; justify-content: flex-start; text-align: left; padding: 0.9rem 1.2rem;}
+.st-key-opts button > div {justify-content: flex-start; text-align: left;}
+.st-key-opts button p {font-weight: 400;}
+.st-key-opts button[kind="primary"] {background: #33270F; border: 2px solid var(--amber);}
+.st-key-opts button[kind="primary"] p {color: var(--ink);}
+.option {background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 0.7rem 1rem; margin-bottom: 0.45rem; color: var(--ink);}
+.option b {color: var(--amber); margin-right: 0.8rem;}
+.option.correct {border-color: var(--mint); background: #17271E;}
+.option.wrong {border-color: var(--coral); background: #2D1B17;}
+.option small {color: var(--muted); margin-left: 0.6rem;}
 
-/* Sidebar */
-[data-testid="stSidebar"] {background: var(--side); border-right: 1px solid var(--rule);}
-.wordmark {font-size: 1.35rem; font-weight: 700; color: var(--pen); margin-bottom: 0.1rem;}
-.side-note {font-size: 0.9rem !important; color: var(--muted) !important; margin-bottom: 1rem;}
-.file-row {padding: 0.55rem 0; border-bottom: 1px solid var(--rule);}
-.file-row:last-child {border-bottom: none;}
-.file-name {font-weight: 700; font-size: 0.92rem; color: var(--ink); overflow-wrap: anywhere;}
-.file-meta {font-size: 0.82rem; color: var(--muted);}
-.tag {display: inline-block; font-size: 0.72rem; font-weight: 700; color: var(--pen); border: 1px solid var(--pen); border-radius: 3px; padding: 0 0.3rem; margin-right: 0.35rem;}
-.disclaimer {font-size: 0.8rem !important; color: var(--muted) !important; margin-top: 1.5rem;}
-
-/* Navigation */
-button[kind="segmented_controlActive"] {background: var(--pen) !important; border-color: var(--pen) !important;}
-button[kind="segmented_controlActive"] p {color: #fff !important;}
-
-/* Buttons */
-.stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {border-radius: 6px; font-weight: 700;}
-
-/* Chat: your questions sit on a grey slip, answers on the page */
-[data-testid="stChatMessage"] {background: transparent; padding: 0.9rem 0; border-radius: 0;}
-[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {
-    background: var(--side); border-radius: 8px; padding: 0.8rem 1rem;
-}
-.meta {font-size: 0.8rem; color: var(--muted);}
-
-/* Quiz results */
-.score {font-size: 1.5rem !important; margin-bottom: 0.2rem;}
-.option {padding: 0.25rem 0; color: var(--ink);}
-.option .letter {display: inline-block; width: 1.6rem; font-weight: 700; color: var(--muted);}
-.option.correct .letter {color: var(--ink);}
-.option.correct .text {font-weight: 700;}
-.option.wrong .text {color: var(--wrong); text-decoration: line-through;}
-.option .note {font-size: 0.8rem; color: var(--muted); margin-left: 0.4rem;}
-.option.wrong .note {color: var(--wrong);}
-.why {color: var(--muted) !important; font-size: 0.95rem !important; margin-top: 0.5rem;}
-
-@media (max-width: 640px) {
-    .intro-title {font-size: 2rem;}
-    .block-container {padding-top: 1.5rem;}
-}
+@media (max-width: 640px) {.headline {font-size: 2.2rem;} .qtext {font-size: 1.5rem;} .right {text-align: left;}}
 </style>
 """,
     unsafe_allow_html=True,
@@ -221,6 +194,7 @@ class QuizQuestion(BaseModel):
     options: list[str]
     correct_option: int  # 0 = A, 1 = B, 2 = C, 3 = D
     explanation: str
+    source: str  # file name (and page) the question comes from
 
 
 def generate_quiz(prompt, media, number):
@@ -263,6 +237,7 @@ def generate_quiz(prompt, media, number):
                             "options": options,
                             "correct": q.correct_option,
                             "explanation": q.explanation,
+                            "source": q.source,
                         })
                 if quiz:
                     seconds = time.time() - started
@@ -315,7 +290,9 @@ def load_files(uploaded_files):
     """Send every uploaded file to Gemini as a whole, so it can read all of it."""
     docs = []
     cache = st.session_state["media_cache"]
-    inline_total = 0
+    inline_total = sum(
+        d["size"] for d in st.session_state["docs"].values() if isinstance(d["media"][1], types.Part)
+    )
 
     for file in uploaded_files:
         kind, mime = file_kind(file.name)
@@ -365,284 +342,160 @@ def describe_files(docs):
 
 
 # ---------- Session state ----------
-st.session_state.setdefault("messages", [])
-st.session_state.setdefault("last_summary", "")
-st.session_state.setdefault("quiz", [])
-st.session_state.setdefault("quiz_id", 0)
-st.session_state.setdefault("quiz_answers", None)
-st.session_state.setdefault("media_cache", {})
-st.session_state.setdefault("page", PAGES[0])
+PAGES = ["Desk", "Ask", "Summarize", "Quiz"]
+DEFAULTS = {
+    "page": "Desk", "docs": {}, "media_cache": {}, "upload_id": 0,
+    "messages": [], "last_summary": "",
+    "quiz": [], "quiz_picks": [], "quiz_index": 0, "quiz_done": False,
+}
+for name, value in DEFAULTS.items():
+    st.session_state.setdefault(name, value)
+state = st.session_state
+
+
+def go(page):
+    state["page"] = page
 
 
 def clear_results():
-    st.session_state["messages"] = []
-    st.session_state["last_summary"] = ""
-    st.session_state["quiz"] = []
-    st.session_state["quiz_answers"] = None
+    state.update(messages=[], last_summary="", quiz=[], quiz_picks=[], quiz_index=0, quiz_done=False)
 
 
-# ---------- Sidebar ----------
-with st.sidebar:
-    st.markdown(
-        '<div class="wordmark">Study Assistant</div>'
-        '<p class="side-note">Add lecture notes, photos of your notebook or class recordings.</p>',
-        unsafe_allow_html=True,
+def remove_file(key):
+    state["docs"].pop(key, None)
+    state["media_cache"].pop(key, None)
+    clear_results()
+
+
+def pick(option):
+    state["quiz_picks"][state["quiz_index"]] = option
+
+
+def move(step):
+    state["quiz_index"] += step
+
+
+def finish_quiz():
+    state["quiz_done"] = True
+
+
+def retry_quiz():
+    state.update(quiz_picks=[None] * len(state["quiz"]), quiz_index=0, quiz_done=False)
+
+
+def new_quiz():
+    state.update(quiz=[], quiz_picks=[], quiz_index=0, quiz_done=False)
+
+
+def kicker(text):
+    st.markdown(f'<p class="kicker">{text}</p>', unsafe_allow_html=True)
+
+
+# ---------- Top bar ----------
+logo_col, *nav_cols, count_col = st.columns([2.2, 1, 1, 1.3, 1, 2.2])
+logo_col.markdown('<div class="logo serif">study<b>lamp</b></div>', unsafe_allow_html=True)
+for col, name in zip(nav_cols, PAGES):
+    col.button(
+        name, key=f"nav_{name}", on_click=go, args=(name,), width="stretch",
+        type="primary" if state["page"] == name else "secondary",
     )
+total = len(state["docs"])
+count_col.markdown(
+    f'<p class="muted right">{total} file{"s" if total != 1 else ""} on desk</p>', unsafe_allow_html=True
+)
+st.write("")
 
-    uploaded_files = st.file_uploader(
-        "Your files",
-        type=ALL_EXTENSIONS,
-        accept_multiple_files=True,
-        help="You can select several files at once.",
-    )
+page = state["page"]
+docs = list(state["docs"].values())
+media = [item for doc in docs for item in doc["media"]]
 
-    docs = load_files(uploaded_files) if uploaded_files else []
+# ---------- Desk ----------
+if page == "Desk":
+    left, right = st.columns([1.5, 1], gap="medium")
 
-    if docs:
-        rows = ""
-        for doc in docs:
-            meta = format_size(doc["size"])
-            if doc["kind"] == "pdf":
-                meta = f"{doc['pages']} pages, {meta}"
-            rows += (
-                f'<div class="file-row"><div class="file-name">'
-                f'<span class="tag">{KIND_LABELS[doc["kind"]]}</span>{html.escape(doc["name"])}</div>'
-                f'<div class="file-meta">{meta}</div></div>'
-            )
-        st.markdown(rows, unsafe_allow_html=True)
-        st.write("")
-        st.button("Clear all results", on_click=clear_results, width="stretch")
+    with left, st.container(key="hero"):
+        st.markdown(
+            '<div class="headline serif">What are we<br>studying <i>tonight?</i></div>'
+            '<p class="muted">Put your notes on the desk and pick how you want to learn.</p>',
+            unsafe_allow_html=True,
+        )
+        uploads = st.file_uploader(
+            "Drop files here", type=ALL_EXTENSIONS, accept_multiple_files=True,
+            key=f"uploader_{state['upload_id']}", label_visibility="collapsed",
+        )
+        if uploads:
+            fresh = [f for f in uploads if f"{f.name}-{f.size}" not in state["docs"]]
+            loaded = load_files(fresh)
+            for doc in loaded:
+                state["docs"][f"{doc['name']}-{doc['size']}"] = doc
+            # Reset the uploader once everything is on the desk. If a file failed, keep its error visible.
+            if len(loaded) == len(fresh):
+                if loaded:
+                    clear_results()
+                state["upload_id"] += 1
+                st.rerun()
+
+    with right:
+        with st.container(key="files"):
+            kicker("ON YOUR DESK")
+            if not state["docs"]:
+                st.markdown('<p class="muted">Nothing yet. Add a file to begin.</p>', unsafe_allow_html=True)
+            for key, doc in state["docs"].items():
+                info, remove = st.columns([6, 1])
+                detail = f"{doc['pages']} pages" if doc["kind"] == "pdf" else format_size(doc["size"])
+                info.markdown(
+                    f'<p>{html.escape(doc["name"])} <span class="muted">{detail}</span></p>',
+                    unsafe_allow_html=True,
+                )
+                remove.button("✕", key=f"remove_{key}", on_click=remove_file, args=(key,), help="Remove file")
+        st.button("**Ask →**  \nClear a doubt from your own notes.", key="tile_ask",
+                  on_click=go, args=("Ask",), width="stretch")
+        st.button("**Summarize →**  \nShort, detailed or exam sheet.", key="tile_sum",
+                  on_click=go, args=("Summarize",), width="stretch")
+        st.button("**Quiz →**  \nCheck what actually stuck.", key="tile_quiz",
+                  on_click=go, args=("Quiz",), width="stretch")
 
     st.markdown(
-        '<p class="disclaimer">Answers are written by Google Gemini and can be wrong. '
+        '<p class="muted">Answers are written by Google Gemini and can be wrong. '
         "Check anything important against your notes.</p>",
         unsafe_allow_html=True,
     )
 
-# ---------- Welcome screen ----------
-if not docs:
-    st.markdown(
-        """
-<h1 class="intro-title"><span class="marked">Study from your own notes.</span></h1>
-<p class="lede">Upload lecture PDFs, photos of your notebook or a recorded class.
-Ask questions about them, get a summary for revision, or test yourself with a quiz.</p>
-<ol class="steps">
-  <li><strong>Add your files</strong> in the sidebar. You can add several at once.</li>
-  <li><strong>Choose Ask, Summarize or Quiz</strong> at the top of the page.</li>
-  <li><strong>Check answers against your notes.</strong> Each answer says which file it came from.</li>
-</ol>
-<p class="formats">Works with PDFs, images (PNG, JPG, WEBP, HEIC), video (MP4, MOV, WEBM)
-and audio (MP3, WAV). Files up to 200 MB each.</p>
-""",
-        unsafe_allow_html=True,
-    )
-    st.stop()
-
-# ---------- Main app ----------
-media = [item for doc in docs for item in doc["media"]]
-
-st.markdown(
-    f'<div class="masthead"><h1>Study Assistant</h1>'
-    f"<p>Working from {describe_files(docs)}.</p></div>",
-    unsafe_allow_html=True,
-)
-
-choice = st.segmented_control(
-    "Feature", PAGES, default=st.session_state["page"], label_visibility="collapsed"
-)
-if choice:
-    st.session_state["page"] = choice
-page = st.session_state["page"]
+# ---------- No files yet ----------
+elif not docs:
+    st.subheader("Your desk is empty")
+    st.write("Add at least one file first.")
+    st.button("Go to Desk", type="primary", on_click=go, args=("Desk",))
 
 # ---------- Ask ----------
-if page == "Ask":
-    messages = st.session_state["messages"]
+elif page == "Ask":
+    messages = state["messages"]
     question = None
 
     if not messages:
         st.subheader("Ask about your files")
-        st.write("Type a question at the bottom of the page. Follow-up questions remember the conversation.")
-        suggestions = [
-            "Explain the main topics",
-            "List the key definitions",
-            "What might come up in the exam?",
-        ]
-        cols = st.columns(len(suggestions))
-        for col, suggestion in zip(cols, suggestions):
+        st.write(f"Working from {describe_files(docs)}.")
+        suggestions = ["Explain the main topics", "List the key definitions", "What might come up in the exam?"]
+        for col, suggestion in zip(st.columns(len(suggestions)), suggestions):
             if col.button(suggestion, width="stretch"):
                 question = suggestion
     else:
-        _, save_col, clear_col = st.columns([3, 1, 1])
+        _, save_col, clear_col = st.columns([4, 1, 1])
         chat_text = "\n\n".join(
             f"**{'You' if m['role'] == 'user' else 'Assistant'}:** {m['content']}" for m in messages
         )
         save_col.download_button("Save chat", chat_text, file_name="chat.md", width="stretch")
         if clear_col.button("Clear chat", width="stretch"):
-            st.session_state["messages"] = []
+            state["messages"] = []
             st.rerun()
 
     for message in messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if message.get("meta"):
-                st.markdown(f'<span class="meta">{message["meta"]}</span>', unsafe_allow_html=True)
+                st.markdown(f'<span class="muted">{message["meta"]}</span>', unsafe_allow_html=True)
 
     typed = st.chat_input("Ask a question about your files")
     question = typed or question
 
-    if question:
-        with st.chat_message("user"):
-            st.markdown(question)
-
-        history = "\n".join(
-            f"{'Student' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
-            for m in messages[-6:]
-        )
-        prompt = f"""You are a helpful study assistant.
-Answer using ONLY the attached study files. Read every page of each PDF, including text,
-tables, diagrams and scanned or handwritten pages, and also use any images, videos and audio.
-Explain simply. If the answer is not in the files, say so.
-When useful, mention which file (and page) the answer comes from.
-
-CONVERSATION SO FAR:
-{history or "(none)"}
-
-QUESTION: {question}"""
-
-        with st.chat_message("assistant"):
-            answer = stream_gemini(prompt, media)
-
-        if answer:
-            messages.append({"role": "user", "content": question})
-            messages.append(
-                {"role": "assistant", "content": answer, "meta": st.session_state.get("last_meta", "")}
-            )
-            st.rerun()
-
-# ---------- Summarize ----------
-elif page == "Summarize":
-    st.subheader("Summarize your files")
-    style = st.radio(
-        "Summary style",
-        ["Short", "Detailed", "Exam revision sheet"],
-        horizontal=True,
-        captions=["Key points only", "Section by section", "Definitions, formulas, likely questions"],
-    )
-    clicked = st.button("Write summary", type="primary")
-
-    if clicked:
-        prompt = f"""Summarize ALL the attached study files: every page of each PDF, plus any images, videos or audio.
-Style: {style}. Use headings and bullet points. Keep definitions and formulas.
-If there are several files, cover each of them."""
-        summary = stream_gemini(prompt, media)
-        if summary:
-            st.session_state["last_summary"] = summary
-            st.session_state["summary_meta"] = st.session_state.get("last_meta", "")
-    elif st.session_state["last_summary"]:
-        st.markdown(st.session_state["last_summary"])
-        st.markdown(f'<span class="meta">{st.session_state.get("summary_meta", "")}</span>', unsafe_allow_html=True)
-
-    if st.session_state["last_summary"]:
-        st.write("")
-        st.download_button(
-            "Download summary",
-            st.session_state["last_summary"],
-            file_name="summary.md",
-            mime="text/markdown",
-        )
-
-# ---------- Quiz ----------
-elif page == "Quiz":
-    st.subheader("Test yourself")
-    col1, col2 = st.columns(2)
-    number = col1.slider("Number of questions", 3, 15, 5)
-    difficulty = col2.selectbox("Difficulty", ["Easy", "Medium", "Hard"])
-
-    if st.button("Create quiz", type="primary"):
-        prompt = f"""Create {number} {difficulty} multiple-choice questions
-covering ALL the attached study files: every page of each PDF, plus any images, videos or audio.
-Spread the questions across all the files and topics.
-Each question has exactly 4 options (write the options without A/B/C/D letters),
-correct_option is the index of the right option (0 to 3), and explanation briefly says why it is right.
-Mix up which position the correct option is in."""
-        quiz = generate_quiz(prompt, media, number)
-        if quiz:
-            st.session_state["quiz"] = quiz
-            st.session_state["quiz_answers"] = None
-            st.session_state["quiz_id"] += 1
-            st.session_state["quiz_meta"] = st.session_state.get("last_meta", "")
-            st.rerun()
-
-    quiz = st.session_state["quiz"]
-    quiz_id = st.session_state["quiz_id"]
-    answers = st.session_state["quiz_answers"]
-
-    if quiz and answers is None:
-        # Taking the quiz
-        st.markdown(f'<span class="meta">{st.session_state.get("quiz_meta", "")}</span>', unsafe_allow_html=True)
-        with st.form(f"quiz_form_{quiz_id}", border=False):
-            for i, q in enumerate(quiz):
-                with st.container(border=True):
-                    st.markdown(f"**Question {i + 1} of {len(quiz)}**")
-                    st.markdown(q["question"])
-                    st.radio(
-                        f"Answer for question {i + 1}",
-                        range(4),
-                        format_func=lambda j, q=q: f"{LETTERS[j]}.  {q['options'][j]}",
-                        index=None,
-                        key=f"quiz_{quiz_id}_{i}",
-                        label_visibility="collapsed",
-                    )
-            if st.form_submit_button("Submit answers", type="primary"):
-                st.session_state["quiz_answers"] = [
-                    st.session_state.get(f"quiz_{quiz_id}_{i}") for i in range(len(quiz))
-                ]
-                st.rerun()
-
-    elif quiz:
-        # Showing results
-        score = sum(1 for q, a in zip(quiz, answers) if a == q["correct"])
-        percent = score / len(quiz) * 100
-        if percent >= 80:
-            message = "Strong result. Read the explanations for any you guessed."
-        elif percent >= 50:
-            message = "Halfway there. Go through the ones you missed below."
-        else:
-            message = "Worth another read of your notes before you retake it."
-
-        st.markdown(
-            f'<p class="score">You got <strong>{score} of {len(quiz)}</strong> right.</p><p>{message}</p>',
-            unsafe_allow_html=True,
-        )
-
-        for i, (q, chosen) in enumerate(zip(quiz, answers)):
-            with st.container(border=True):
-                result = "Correct" if chosen == q["correct"] else ("Not answered" if chosen is None else "Incorrect")
-                st.markdown(f"**Question {i + 1}: {result}**")
-                st.markdown(q["question"])
-                rows = ""
-                for j, option in enumerate(q["options"]):
-                    text = html.escape(option)
-                    if j == q["correct"]:
-                        note = "Your answer" if j == chosen else "Correct answer"
-                        rows += (
-                            f'<div class="option correct"><span class="letter">{LETTERS[j]}</span>'
-                            f'<span class="text marked">{text}</span><span class="note">{note}</span></div>'
-                        )
-                    elif j == chosen:
-                        rows += (
-                            f'<div class="option wrong"><span class="letter">{LETTERS[j]}</span>'
-                            f'<span class="text">{text}</span><span class="note">Your answer</span></div>'
-                        )
-                    else:
-                        rows += (
-                            f'<div class="option"><span class="letter">{LETTERS[j]}</span>'
-                            f'<span class="text">{text}</span></div>'
-                        )
-                st.markdown(rows, unsafe_allow_html=True)
-                st.markdown(f'<p class="why">{html.escape(q["explanation"])}</p>', unsafe_allow_html=True)
-
-        if st.button("Retake this quiz"):
-            st.session_state["quiz_answers"] = None
-            st.session_state["quiz_id"] += 1
-            st.rerun()
+    if qu
