@@ -1,11 +1,14 @@
 import html
 import io
+import json
 import os
+import re
 import time
 
 import streamlit as st
 from google import genai
 from google.genai import types
+from pydantic import BaseModel
 from pypdf import PdfReader
 
 # If one model is busy, the next one is tried
@@ -199,6 +202,49 @@ def upload_to_gemini(data, name, mime):
     return gemini_file
 
 
+class QuizQuestion(BaseModel):
+    question: str
+    options: list[str]
+    correct_option: int  # 0 = A, 1 = B, 2 = C, 3 = D
+    explanation: str
+
+
+def generate_quiz(prompt, media):
+    """Ask Gemini for quiz questions as structured data (not plain text)."""
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=list[QuizQuestion],
+    )
+    last_error = None
+    for attempt in range(2):
+        for model in MODELS:
+            try:
+                response = client.models.generate_content(
+                    model=model, contents=[prompt] + media, config=config
+                )
+                raw = response.parsed or [
+                    QuizQuestion(**item) for item in json.loads(response.text)
+                ]
+                quiz = []
+                for q in raw:
+                    options = [re.sub(r"^\s*[A-Da-d][\.\):]\s+", "", o).strip() for o in q.options]
+                    if len(options) == 4 and 0 <= q.correct_option <= 3:
+                        quiz.append({
+                            "question": q.question,
+                            "options": options,
+                            "correct": q.correct_option,
+                            "explanation": q.explanation,
+                        })
+                if quiz:
+                    return quiz
+            except Exception as error:
+                last_error = error
+        if attempt == 0:
+            time.sleep(2)
+    st.error(f"Gemini error: {last_error}")
+    return None
+
+
 # ---------- File reading ----------
 def file_kind(name):
     ext = os.path.splitext(name)[1].lower().lstrip(".")
@@ -264,7 +310,9 @@ def load_files(uploaded_files):
 # ---------- Session state ----------
 st.session_state.setdefault("messages", [])
 st.session_state.setdefault("last_summary", "")
-st.session_state.setdefault("last_quiz", "")
+st.session_state.setdefault("quiz", [])
+st.session_state.setdefault("quiz_id", 0)
+st.session_state.setdefault("quiz_answers", None)
 st.session_state.setdefault("media_cache", {})
 st.session_state.setdefault("page", PAGES[0])
 
@@ -272,7 +320,8 @@ st.session_state.setdefault("page", PAGES[0])
 def start_over():
     st.session_state["messages"] = []
     st.session_state["last_summary"] = ""
-    st.session_state["last_quiz"] = ""
+    st.session_state["quiz"] = []
+    st.session_state["quiz_answers"] = None
 
 
 # ---------- Sidebar ----------
@@ -466,6 +515,8 @@ If there are several files, cover each of them."""
 
 # ---------- Quiz ----------
 elif page == PAGES[2]:
+    LETTERS = ["A", "B", "C", "D"]
+
     col1, col2 = st.columns(2)
     number = col1.slider("Number of questions", 3, 15, 5)
     difficulty = col2.selectbox("Difficulty", ["Easy", "Medium", "Hard"])
@@ -474,17 +525,81 @@ elif page == PAGES[2]:
         prompt = f"""Create {number} {difficulty} multiple-choice questions
 covering ALL the attached study files: every page of each PDF, plus any images, videos or audio.
 Spread the questions across all the files and topics.
-Number each question in bold, and put options A to D on separate lines.
-Write the line ###ANSWERS### and then the answers with short explanations."""
+Each question has exactly 4 options (write the options without A/B/C/D letters),
+correct_option is the index of the right option (0 to 3), and explanation briefly says why it is right.
+Mix up which position the correct option is in."""
         with st.spinner("Creating your quiz..."):
-            quiz = stream_gemini(prompt, media, show=False)
+            quiz = generate_quiz(prompt, media)
         if quiz:
-            st.session_state["last_quiz"] = quiz
+            st.session_state["quiz"] = quiz
+            st.session_state["quiz_answers"] = None
+            st.session_state["quiz_id"] += 1
+            st.rerun()
 
-    if st.session_state["last_quiz"]:
-        questions, _, answers = st.session_state["last_quiz"].partition("###ANSWERS###")
+    quiz = st.session_state["quiz"]
+    quiz_id = st.session_state["quiz_id"]
+    answers = st.session_state["quiz_answers"]
+
+    def option_labels(q):
+        return [f"{LETTERS[j]}. {text}" for j, text in enumerate(q["options"])]
+
+    if quiz and answers is None:
+        # Taking the quiz
+        with st.form(f"quiz_form_{quiz_id}", border=False):
+            for i, q in enumerate(quiz):
+                with st.container(border=True):
+                    st.markdown(f"**Question {i + 1} of {len(quiz)}**")
+                    st.markdown(q["question"])
+                    st.radio(
+                        f"Answer for question {i + 1}",
+                        range(4),
+                        format_func=lambda j, q=q: option_labels(q)[j],
+                        index=None,
+                        key=f"quiz_{quiz_id}_{i}",
+                        label_visibility="collapsed",
+                    )
+            if st.form_submit_button("✅ Submit answers", type="primary"):
+                st.session_state["quiz_answers"] = [
+                    st.session_state.get(f"quiz_{quiz_id}_{i}") for i in range(len(quiz))
+                ]
+                st.rerun()
+
+    elif quiz:
+        # Showing results
+        score = sum(1 for q, a in zip(quiz, answers) if a == q["correct"])
+        percent = round(score / len(quiz) * 100)
+        if percent >= 80:
+            message = "🏆 Excellent work!"
+        elif percent >= 50:
+            message = "👍 Good effort, review the ones you missed."
+        else:
+            message = "📚 Keep practicing, check the explanations below."
+
         with st.container(border=True):
-            st.markdown(questions)
-        if answers:
-            with st.expander("✅ Show answers"):
-                st.markdown(answers)
+            c1, c2 = st.columns([1, 3])
+            c1.metric("Your score", f"{score} / {len(quiz)}")
+            c2.markdown(f"### {message}")
+            c2.progress(percent / 100, text=f"{percent}% correct")
+
+        for i, (q, chosen) in enumerate(zip(quiz, answers)):
+            with st.container(border=True):
+                status = "✅" if chosen == q["correct"] else "❌"
+                st.markdown(f"**{status} Question {i + 1}**")
+                st.markdown(q["question"])
+                lines = []
+                for j, label in enumerate(option_labels(q)):
+                    if j == q["correct"]:
+                        lines.append(f"🟢 **{label}**")
+                    elif j == chosen:
+                        lines.append(f"🔴 ~~{label}~~ (your answer)")
+                    else:
+                        lines.append(f"⚪ {label}")
+                st.markdown("  \n".join(lines))
+                if chosen is None:
+                    st.caption("You didn't answer this one.")
+                st.info(f"**Why:** {q['explanation']}")
+
+        if st.button("🔁 Retake this quiz"):
+            st.session_state["quiz_answers"] = None
+            st.session_state["quiz_id"] += 1
+            st.rerun()
