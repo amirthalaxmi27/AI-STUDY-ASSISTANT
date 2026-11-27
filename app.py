@@ -154,6 +154,13 @@ except Exception:
 
 
 # ---------- Gemini helpers ----------
+def model_config(model, **settings):
+    """Gemini 2.5 models 'think' before answering by default, which is slow. Turn it off."""
+    if model.startswith("gemini-2.5"):
+        settings["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+    return types.GenerateContentConfig(**settings)
+
+
 def stream_gemini(prompt, media=None, show=True):
     """Send the prompt plus any media to Gemini. Streams the answer on screen if show=True."""
     contents = [prompt] + (media or [])
@@ -162,9 +169,10 @@ def stream_gemini(prompt, media=None, show=True):
         for model in MODELS:
             placeholder = st.empty() if show else None
             full_text = ""
+            started = time.time()
             try:
                 for chunk in client.models.generate_content_stream(
-                    model=model, contents=contents
+                    model=model, contents=contents, config=model_config(model)
                 ):
                     if chunk.text:
                         full_text += chunk.text
@@ -173,6 +181,7 @@ def stream_gemini(prompt, media=None, show=True):
                 if full_text:
                     if placeholder:
                         placeholder.markdown(full_text)
+                    st.session_state["last_meta"] = f"⚡ {model} · {time.time() - started:.1f}s"
                     return full_text
             except Exception as error:
                 last_error = error
@@ -209,24 +218,39 @@ class QuizQuestion(BaseModel):
     explanation: str
 
 
-def generate_quiz(prompt, media):
-    """Ask Gemini for quiz questions as structured data (not plain text)."""
-    config = types.GenerateContentConfig(
-        response_mime_type="application/json",
-        response_schema=list[QuizQuestion],
-    )
+def generate_quiz(prompt, media, number):
+    """Ask Gemini for quiz questions as structured data, showing live progress."""
+    status = st.status("Creating your quiz...", expanded=True)
+    with status:
+        bar = st.progress(0.0, text="Sending your files to Gemini...")
+
+    started = time.time()
     last_error = None
     for attempt in range(2):
         for model in MODELS:
+            config = model_config(
+                model,
+                response_mime_type="application/json",
+                response_schema=list[QuizQuestion],
+            )
             try:
-                response = client.models.generate_content(
+                bar.progress(0.0, text=f"Reading your files with {model}...")
+                text = ""
+                for chunk in client.models.generate_content_stream(
                     model=model, contents=[prompt] + media, config=config
-                )
-                raw = response.parsed or [
-                    QuizQuestion(**item) for item in json.loads(response.text)
-                ]
+                ):
+                    if chunk.text:
+                        text += chunk.text
+                        written = min(text.count('"question"'), number)
+                        if written:
+                            bar.progress(
+                                written / number,
+                                text=f"Writing question {written} of {number}...",
+                            )
+
                 quiz = []
-                for q in raw:
+                for item in json.loads(text):
+                    q = QuizQuestion(**item)
                     options = [re.sub(r"^\s*[A-Da-d][\.\):]\s+", "", o).strip() for o in q.options]
                     if len(options) == 4 and 0 <= q.correct_option <= 3:
                         quiz.append({
@@ -236,11 +260,22 @@ def generate_quiz(prompt, media):
                             "explanation": q.explanation,
                         })
                 if quiz:
+                    bar.progress(1.0, text="Done!")
+                    st.session_state["last_meta"] = f"⚡ {model} · {time.time() - started:.1f}s"
+                    status.update(
+                        label=f"Quiz ready · ⚡ {model} · {time.time() - started:.1f}s",
+                        state="complete",
+                        expanded=False,
+                    )
                     return quiz
             except Exception as error:
                 last_error = error
+                with status:
+                    st.caption(f"⚠️ {model} didn't respond properly, trying the next model...")
         if attempt == 0:
             time.sleep(2)
+
+    status.update(label="Couldn't create the quiz", state="error", expanded=True)
     st.error(f"Gemini error: {last_error}")
     return None
 
@@ -455,6 +490,8 @@ if page == PAGES[0]:
     for message in messages:
         with st.chat_message(message["role"], avatar=AVATARS[message["role"]]):
             st.markdown(message["content"])
+            if message.get("meta"):
+                st.caption(message["meta"])
 
     typed = st.chat_input("Ask anything about your files...")
     question = typed or question
@@ -483,7 +520,9 @@ QUESTION: {question}"""
 
         if answer:
             messages.append({"role": "user", "content": question})
-            messages.append({"role": "assistant", "content": answer})
+            messages.append(
+                {"role": "assistant", "content": answer, "meta": st.session_state.get("last_meta", "")}
+            )
             st.rerun()
 
 # ---------- Summarize ----------
@@ -501,9 +540,11 @@ If there are several files, cover each of them."""
             summary = stream_gemini(prompt, media)
         if summary:
             st.session_state["last_summary"] = summary
+            st.session_state["summary_meta"] = st.session_state.get("last_meta", "")
     elif st.session_state["last_summary"]:
         with st.container(border=True):
             st.markdown(st.session_state["last_summary"])
+            st.caption(st.session_state.get("summary_meta", ""))
 
     if st.session_state["last_summary"]:
         st.download_button(
@@ -528,12 +569,12 @@ Spread the questions across all the files and topics.
 Each question has exactly 4 options (write the options without A/B/C/D letters),
 correct_option is the index of the right option (0 to 3), and explanation briefly says why it is right.
 Mix up which position the correct option is in."""
-        with st.spinner("Creating your quiz..."):
-            quiz = generate_quiz(prompt, media)
+        quiz = generate_quiz(prompt, media, number)
         if quiz:
             st.session_state["quiz"] = quiz
             st.session_state["quiz_answers"] = None
             st.session_state["quiz_id"] += 1
+            st.session_state["quiz_meta"] = st.session_state.get("last_meta", "")
             st.rerun()
 
     quiz = st.session_state["quiz"]
@@ -542,6 +583,9 @@ Mix up which position the correct option is in."""
 
     def option_labels(q):
         return [f"{LETTERS[j]}. {text}" for j, text in enumerate(q["options"])]
+
+    if quiz and st.session_state.get("quiz_meta"):
+        st.caption(f"Created with {st.session_state['quiz_meta']}")
 
     if quiz and answers is None:
         # Taking the quiz
